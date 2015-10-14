@@ -198,8 +198,6 @@ class Multisite_Comment_Management {
 			return;
 		}
 		
-		delete_site_option( 'ms-comment-management-status' );
-		
 		global $wpdb;
 		
 		foreach ( $_POST['ms-comment-mgmt']['comments'] as $k => $v ) {
@@ -232,14 +230,42 @@ class Multisite_Comment_Management {
 				$comment_ids = $wpdb->get_col( $wpdb->prepare( $query, $status ) );
 				if ( ! is_wp_error( $comment_ids ) && ! empty( $comment_ids ) ) {
 					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', implode( "\r", $comment_ids ) );
-					/*$wpdb->delete( $wpdb->commentmeta, array( 'comment_id' => $comment_ids ), array( '%d' ) );
-					$wpdb->delete( $wpdb->comments, array( 'comment_ID' => $comment_ids ), array( '%d' ) );
-					wp_update_comment_count();*/
+					
+					$comment_placeholders = array_fill( 0, count( $comment_ids ), '%d' );
+					$comment_placeholders = implode( ', ', $comment_placeholders );
+					$query = "DELETE FROM {$wpdb->commentmeta} WHERE comment_id IN ( {$comment_placeholders} )";
+					$q2 = "DELETE FROM {$wpdb->comments} WHERE comment_ID IN ( {$comment_placeholders} )";
+					
+					/**
+					 * Delete comment meta data
+					 */
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $wpdb->prepare( $query, $comment_ids ) );
+					$msg = $wpdb->query( $wpdb->prepare( $query, $comment_ids ) );
+					/*$msg = $wpdb->delete( $wpdb->commentmeta, array( 'comment_id' => $comment_ids ), array( '%d' ) );*/
+					if ( is_wp_error( $msg ) ) {
+						$msg = $msg->get_error_message();
+					}
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );
+					
+					/**
+					 * Delete comments
+					 */
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $wpdb->prepare( $q2, $comment_ids ) );
+					$msg = $wpdb->query( $wpdb->prepare( $q2, $comment_ids ) );
+					/*$msg = $wpdb->delete( $wpdb->comments, array( 'comment_ID' => $comment_ids ), array( '%d' ) );*/
+					if ( is_wp_error( $msg ) ) {
+						$msg = $msg->get_error_message();
+					}
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );
+				} else if ( is_wp_error( $comment_ids ) ) {
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $comment_ids->get_error_message() );
 				}
 				
 				restore_current_blog();
 			}
 		}
+		
+		delete_site_option( 'ms-comment-management-status' );
 		
 		add_action( 'did-multisite-comments-prune', array( $this, 'did_multisite_comments_prune_message' ) );
 	}

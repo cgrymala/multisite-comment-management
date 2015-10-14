@@ -201,6 +201,8 @@ class Multisite_Comment_Management {
 		global $wpdb;
 		
 		foreach ( $_POST['ms-comment-mgmt']['comments'] as $k => $v ) {
+			$k = intval( $k );
+			
 			$this->did_pruning_message[] = sprintf( '<p>Preparing to review comments on the site with an ID of %d</p>', $k );
 			
 			$status = array();

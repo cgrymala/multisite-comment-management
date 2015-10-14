@@ -24,6 +24,8 @@ class Multisite_Comment_Management {
 			return;
 		}
 		add_action( 'network_admin_menu', array( $this, 'network_admin_menu' ) );
+		
+		$this->did_pruning_message = array();
 	}
 	
 	/**
@@ -40,6 +42,21 @@ class Multisite_Comment_Management {
 		);
 		
 		add_action( 'started-ms-comment-mgmt-page', array( $this, 'do_admin_styles' ) );
+		add_action( 'admin_init', array( $this, 'add_meta_boxes' ) );
+	}
+	
+	/**
+	 * Register the meta boxes used on the options page
+	 */
+	function add_meta_boxes() {
+		add_meta_box(
+			/* id       */ 'ms-comment-mgmt-status', 
+			/* title    */ __( 'Comment Status', 'multisite-comment-management' ), 
+			/* callback */ array( $this, 'comment_status_metabox' ), 
+			/* screen   */ 'ms-comment-mgmt', 
+			/* context  */ 'normal', 
+			/* priority */ 'default'
+		);
 	}
 	
 	/**
@@ -58,20 +75,36 @@ class Multisite_Comment_Management {
 	 * Output the main body of the options page
 	 */
 	function do_option_page_content() {
+		echo '<div id="poststuff"><div id="post-body">';
 		do_action( 'started-ms-comment-mgmt-page' );
 		printf( '<form method="post" action="%s">', network_admin_url( 'sites.php?page=ms-comment-mgmt' ) );
 		wp_nonce_field( 'ms-comment-mgmt', '_mscm_nonce' );
-		printf( '<p><input type="submit" name="ms-comment-mgmt[check-comments]" value="%s" class="button button-secondary"/></p>', __( 'Check Comment Status', 'multisite-comment-management' ) );
-		do_action( 'did-multisite-comments-check' );
-		printf( '<fieldset><legend>%1$s</legend><h3>%1$s</h3>', __( 'Comment Management', 'multisite-comment-management' ) );
+		
+		do_meta_boxes( 'ms-comment-mgmt', 'normal', null );
+		
 		do_action( 'did-multisite-comments-prune' );
-		printf( '<fieldset><legend>%1$s</legend><h4>%1$s</h4>', __( 'What to Prune', 'multisite-comment-management' ) );
-		printf( '<p><label><input type="checkbox" name="ms-comment-mgmt[prune][spam]" value="1"/> %s</label></p>', __( 'Delete All Spam Comments', 'multisite-comment-management' ) );
-		printf( '<p><label><input type="checkbox" name="ms-comment-mgmt[prune][unapproved]" value="1"/> %s</label></p>', __( 'Delete All Unapproved Comments', 'multisite-comment-management' ) );
-		echo '</fieldset>';
-		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-comments]" value="%s" class="button button-primary"/></p>', __( 'Delete Comments', 'multisite-comment-management' ) );
-		echo '</fieldset>';
+		
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-comments]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Comments', 'multisite-comment-management' ) );
 		echo '</form>';
+		
+		echo '</div></div>';
+		
+		/* Enqueue WordPress' script for handling the meta boxes */
+		wp_enqueue_script( 'postbox' );
+		
+		/* Add screen option: user can choose between 1 or 2 columns (default 2) */
+		add_screen_option( 'layout_columns', array( 'max' => 2, 'default' => 2 ) );
+		
+		add_action( 'admin_print_footer_scripts', array( $this, 'meta_box_scripts' ) );
+	}
+
+	/**
+	 * Output the comment status meta box
+	 */
+	function comment_status_metabox() {
+		printf( '<p><input type="submit" name="ms-comment-mgmt[check-comments]" value="%s" class="button button-secondary"/></p>', __( 'Check Comment Status', 'multisite-comment-management' ) );
+		_e( '<p>Any items selected below that report as being 0 will be skipped. If you are getting ready to clean out old comments, it is recommended that you check the status before doing so.</p>', 'multisite-comment-management' );
+		do_action( 'did-multisite-comments-check' );
 	}
 	
 	/**
@@ -84,14 +117,16 @@ class Multisite_Comment_Management {
 			return;
 		}
 		if ( ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
-			add_action( 'did-multisite-comments-check', array( $this, 'nonce_not_verified' ) );
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'nonce_not_verified' ) );
 			return;
 		}
 		
 		if ( isset( $_POST['ms-comment-mgmt']['check-comments'] ) ) {
+			echo '<p class="error">The Check Comments button was pressed</p>';
 			add_action( 'did-multisite-comments-check', array( $this, 'check_comment_status' ) );
 		} else if ( isset( $_POST['ms-comment-mgmt']['delete-comments'] ) ) {
-			add_action( 'did-multisite-comments-prune', array( $this, 'delete_comments' ) );
+			echo '<p class="error">The Delete Comments button was pressed</p>';
+			$this->delete_comments();
 		} else {
 			add_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
 		}
@@ -103,7 +138,7 @@ class Multisite_Comment_Management {
 	function check_comment_status() {
 		$sites = $this->gather_sites();
 		if ( is_wp_error( $sites ) || empty( $sites ) ) {
-			add_action( 'did-multisite-comments-check', array( $this, 'no_sites_notice' ) );
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'no_sites_notice' ) );
 			return;
 		}
 		$comments = array();
@@ -151,6 +186,72 @@ class Multisite_Comment_Management {
 	}
 	
 	/**
+	 * Prune any comments that were selected for deletion
+	 */
+	function delete_comments() {
+		if ( ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'nonce_not_verified' ) );
+			return;
+		}
+		if ( ! current_user_can( 'manage_sites' ) ) {
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'no_user_permissions' ) );
+			return;
+		}
+		
+		delete_site_option( 'ms-comment-management-status' );
+		
+		global $wpdb;
+		
+		foreach ( $_POST['ms-comment-mgmt']['comments'] as $k => $v ) {
+			$this->did_pruning_message[] = sprintf( '<p>Preparing to review comments on the site with an ID of %d</p>', $k );
+			
+			$status = array();
+			$status_placeholders = array();
+			
+			if ( isset( $v['spam'] ) && intval( $v['spam'] ) > 0 ) {
+				$status[] = 'spam';
+				$status_placeholders[] = '%s';
+			}
+			if ( isset( $v['unapproved'] ) && intval( $v['unapproved'] ) > 0 ) {
+				$status[] = 0;
+				$status_placeholders[] = '%d';
+			}
+			if ( isset( $v['approved'] ) && intval( $v['approved'] ) > 0 ) {
+				$status[] = 1;
+				$status_placeholders[] = '%d';
+			}
+			if ( ! empty( $status ) ) {
+				switch_to_blog( $k );
+				
+				$status_placeholders = implode( ', ', $status_placeholders );
+				/**
+				 * Retrieve the IDs of all comments being deleted so we can remove them from the commentmeta table
+				 */
+				$query = "SELECT comment_ID FROM {$wpdb->comments} WHERE comment_approved IN ( {$status_placeholders} )";
+				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $wpdb->prepare( $query, $status ) );
+				$comment_ids = $wpdb->get_col( $wpdb->prepare( $query, $status ) );
+				if ( ! is_wp_error( $comment_ids ) && ! empty( $comment_ids ) ) {
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', implode( "\r", $comment_ids ) );
+					/*$wpdb->delete( $wpdb->commentmeta, array( 'comment_id' => $comment_ids ), array( '%d' ) );
+					$wpdb->delete( $wpdb->comments, array( 'comment_ID' => $comment_ids ), array( '%d' ) );
+					wp_update_comment_count();*/
+				}
+				
+				restore_current_blog();
+			}
+		}
+		
+		add_action( 'did-multisite-comments-prune', array( $this, 'did_multisite_comments_prune_message' ) );
+	}
+	
+	function did_multisite_comments_prune_message() {
+		if ( empty( $this->did_pruning_message ) )
+			return;
+		
+		printf( '<div class="warn">%s</div>', implode( '', $this->did_pruning_message ) );
+	}
+	
+	/**
 	 * Output the table of comment status data
 	 * @param array $comments the array of comment status data
 	 */
@@ -163,18 +264,18 @@ class Multisite_Comment_Management {
 			<tr>
 				<th scope="col">%5$s</th>
 				<th scope="col">%1$s</th>
-				<th scope="col">%2$s</th>
-				<th scope="col">%3$s</th>
-				<th scope="col">%4$s</th>
+				<th scope="col"><span class="select-all-button spam"><input type="checkbox"/></span>%2$s</th>
+				<th scope="col"><span class="select-all-button unapproved"><input type="checkbox"/></span>%3$s</th>
+				<th scope="col"><span class="select-all-button approved"><input type="checkbox"/></span>%4$s</th>
 			</tr>
 		</thead>
 		<tfoot>
 			<tr>
-				<th>%5$s</th>
-				<th>%1$s</th>
-				<th>%2$s</th>
-				<th>%3$s</th>
-				<th>%4$s</th>
+				<th scope="col">%5$s</th>
+				<th scope="col">%1$s</th>
+				<th scope="col"><span class="select-all-button spam"><input type="checkbox"/></span>%2$s</th>
+				<th scope="col"><span class="select-all-button unapproved"><input type="checkbox"/></span>%3$s</th>
+				<th scope="col"><span class="select-all-button approved"><input type="checkbox"/></span>%4$s</th>
 			</tr>
 		</tfoot>
 		<tbody>', 
@@ -190,9 +291,9 @@ class Multisite_Comment_Management {
 			printf( '<tr class="%1$s status-row">
 				<th scope="row" class="site-id">%2$d</th>
 				<td class="site-name">%3$s</td>
-				<td class="spam-status number">%4$d</td>
-				<td class="unapproved-status number">%5$d</td>
-				<td class="approved-status number">%6$d</td>
+				<td class="spam-status number"><span class="select-one-button spam"><input type="checkbox" name="ms-comment-mgmt[comments][%2$d][spam]" value="%4$d"/></span>%4$d</td>
+				<td class="unapproved-status number"><span class="select-one-button unapproved"><input type="checkbox" name="ms-comment-mgmt[comments][%2$d][unapproved]" value="%5$d"/></span>%5$d</td>
+				<td class="approved-status number"><span class="select-one-button approved"><input type="checkbox" name="ms-comment-mgmt[comments][%2$d][approved]" value="%6$d"/></span>%6$d</td>
 			</tr>', 
 				$i%2 ? 'odd-row' : 'even-row', 
 				intval( $k ), 
@@ -233,6 +334,34 @@ class Multisite_Comment_Management {
 	 */
 	function warn_multisite() {
 		echo __( '<p class="error">The Multisite Comment Management plugin is intended for use only on multisite installations. This does not appear to be a multisite install, so the plugin will not do anything.</p>', 'multisite-comment-management' );
+	}
+	
+	/**
+	 * Prints script in footer. This 'initialises' the meta boxes
+	 * @see http://code.tutsplus.com/articles/integrating-with-wordpress-ui-meta-boxes-on-custom-pages--wp-26843
+	 */
+	function meta_box_scripts() {
+?>
+		<script>jQuery(  document).ready( function(){ 
+			postboxes.add_postbox_toggles( pagenow ); 
+			jQuery( '.select-all-button input[type="checkbox"]' ).on( 'change', function() {
+				if ( jQuery( this ).parent().hasClass( 'spam' ) ) {
+					jQuery( '.select-one-button.spam input[type="checkbox"], .select-all-button.spam input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+				} else if ( jQuery( this ).parent().hasClass( 'unapproved' ) ) {
+					jQuery( '.select-one-button.unapproved input[type="checkbox"], .select-all-button.unapproved input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+				} else if ( jQuery( this ).parent().hasClass( 'approved' ) ) {
+					jQuery( '.select-one-button.approved input[type="checkbox"], .select-all-button.approved input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+					if ( jQuery( 'thead .select-all-button.approved input[type="checkbox"]' ).first().is( ':checked' ) ) {
+						var confirmSelect = confirm( 'Are you sure you want to delete all approved comments?' );
+						if ( confirmSelect == false ) {
+							jQuery( '.select-all-button.approved, .select-one-button.approved' ).find( 'input[type="checkbox"]' ).prop( 'checked', false );
+							return;
+						}
+					}
+				}
+			} );
+		});</script>
+<?php
 	}
 	
 	/**
@@ -314,6 +443,13 @@ class Multisite_Comment_Management {
 #ms-comment-mgmt-page-wrapper .even-row td {
 	background: #fff;
 	color: #666;
+}
+
+#ms-comment-mgmt-page-wrapper .select-all-button, 
+#ms-comment-mgmt-page-wrapper .select-one-button {
+	float: left;
+	margin: 0;
+	padding: 0;
 }
 </style>
 <?php

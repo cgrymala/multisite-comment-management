@@ -57,6 +57,14 @@ class Multisite_Comment_Management {
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
+		add_meta_box(
+			/* id       */ 'ms-comment-mgmt-transients', 
+			/* title    */ __( 'Transient Management', 'multisite-comment-management' ), 
+			/* callback */ array( $this, 'transient_status_metabox' ), 
+			/* screen   */ 'ms-comment-mgmt', 
+			/* context  */ 'normal', 
+			/* priority */ 'default'
+		);
 	}
 	
 	/**
@@ -82,9 +90,6 @@ class Multisite_Comment_Management {
 		
 		do_meta_boxes( 'ms-comment-mgmt', 'normal', null );
 		
-		do_action( 'did-multisite-comments-prune' );
-		
-		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-comments]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Comments', 'multisite-comment-management' ) );
 		echo '</form>';
 		
 		echo '</div></div>';
@@ -105,15 +110,20 @@ class Multisite_Comment_Management {
 		printf( '<p><input type="submit" name="ms-comment-mgmt[check-comments]" value="%s" class="button button-secondary"/></p>', __( 'Check Comment Status', 'multisite-comment-management' ) );
 		_e( '<p>Any items selected below that report as being 0 will be skipped. If you are getting ready to clean out old comments, it is recommended that you check the status before doing so.</p>', 'multisite-comment-management' );
 		do_action( 'did-multisite-comments-check' );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-comments]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Comments', 'multisite-comment-management' ) );
+		
+		do_action( 'did-multisite-comments-prune' );
 	}
 	
 	/**
 	 * Perform the comment moderation actions
 	 */
 	function do_management() {
+		add_action( 'started-ms-comment-mgmt-page', array( $this, 'welcome_message' ) );
+		add_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
+		add_action( 'did-multisite-transients-check', array( $this, 'old_transient_status' ) );
+		
 		if ( ! isset( $_POST['ms-comment-mgmt'] ) ) {
-			add_action( 'started-ms-comment-mgmt-page', array( $this, 'welcome_message' ) );
-			add_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
 			return;
 		}
 		if ( ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
@@ -122,13 +132,15 @@ class Multisite_Comment_Management {
 		}
 		
 		if ( isset( $_POST['ms-comment-mgmt']['check-comments'] ) ) {
-			echo '<p class="error">The Check Comments button was pressed</p>';
 			add_action( 'did-multisite-comments-check', array( $this, 'check_comment_status' ) );
+			remove_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
 		} else if ( isset( $_POST['ms-comment-mgmt']['delete-comments'] ) ) {
-			echo '<p class="error">The Delete Comments button was pressed</p>';
 			$this->delete_comments();
-		} else {
-			add_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
+		} else if ( isset( $_POST['ms-comment-mgmt']['check-transients'] ) ) {
+			add_action( 'did-multisite-transients-check', array( $this, 'check_transient_status' ) );
+			remove_action( 'did-multisite-transients-check', array( $this, 'old_transient_status' ) );
+		} else if ( isset( $_POST['ms-comment-mgmt']['delete-transients'] ) ) {
+			$this->delete_transients();
 		}
 	}
 	
@@ -288,6 +300,7 @@ class Multisite_Comment_Management {
 			return;
 		
 		printf( '<table id="ms-comment-management-status-data">
+		<caption><h4>%6$s</h4></caption>
 		<thead>
 			<tr>
 				<th scope="col">%5$s</th>
@@ -311,7 +324,8 @@ class Multisite_Comment_Management {
 			__( 'Spam', 'multisite-comment-management' ), 
 			__( 'Unapproved', 'multisite-comment-management' ), 
 			__( 'Approved', 'multisite-comment-management' ), 
-			__( 'ID', 'multisite-comment-management' ) 
+			__( 'ID', 'multisite-comment-management' ) , 
+			__( 'List of All Comments Found In This Installation', 'multisite-comment-management' ) 
 		);
 		
 		$i = 0;
@@ -329,6 +343,263 @@ class Multisite_Comment_Management {
 				intval( $c['spam'] ), 
 				intval( $c['unapproved'] ), 
 				intval( $c['approved'] )
+			);
+			$i++;
+		}
+		echo '</tbody></table>';
+	}
+	
+	/** 
+	 * Output the transient status meta box
+	 */
+	function transient_status_metabox() {
+		printf( '<p><input type="submit" name="ms-comment-mgmt[check-transients]" value="%s" class="button button-secondary"/></p>', __( 'Check Transient Status', 'multisite-comment-management' ) );
+		_e( '<p>Any items selected below that report as being 0 will be skipped. If you are getting ready to clean out transients, it is recommended that you check the status before doing so.</p>', 'multisite-comment-management' );
+		do_action( 'did-multisite-transients-check' );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-transients]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Transients', 'multisite-comment-management' ) );
+		
+		do_action( 'did-multisite-transients-prune' );
+	}
+	
+	/**
+	 * Check for any transients in the various options tables
+	 */
+	function check_transient_status() {
+		$sites = $this->gather_sites();
+		if ( is_wp_error( $sites ) || empty( $sites ) ) {
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'no_sites_notice' ) );
+			return;
+		}
+		$transients = array();
+		global $wpdb;
+		
+		$current_time = current_time( 'timestamp' );
+		$current_mysql = current_time( 'mysql' );
+		
+		foreach ( $sites as $site ) {
+			switch_to_blog( $site );
+			$transients[$site] = array(
+				'name' => get_bloginfo( 'name', 'display' ),
+				'expired' => 0, 
+				'all' => 0,
+				'checked' => $current_mysql
+			);
+			$transients[$site]['expired'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d", '_transient_timeout_%', $current_time ) );
+			$transients[$site]['all'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_name NOT LIKE %s", '_transient_%', '_transient_timeout_%' ) );
+			restore_current_blog();
+		}
+		
+		$sites = $wpdb->get_col( "SELECT id FROM {$wpdb->site}" );
+		if ( ! is_wp_error( $sites ) && ! empty( $sites ) ) {
+			foreach( $sites as $site ) {
+				$transients['networks'][$site] = array(
+					'name' => $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->sitemeta} WHERE site_id=%d AND meta_key=%s", $site, 'site_name' ) ), 
+					'expired' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_value < %d", '_site_transient_timeout_%', $current_time ) ), 
+					'all' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s", '_site_transient_%', '_site_transient_timeout_%' ) ), 
+					'checked' => $current_mysql
+				);
+			}
+		}
+		
+		update_site_option( 'ms-comment-management-transient-status', $transients );
+		$this->output_transient_status_table( $transients );
+	}
+	
+	/**
+	 * Retrieve the most recent transient status data
+	 */
+	function old_transient_status() {
+		$transients = get_site_option( 'ms-comment-management-transient-status', false );
+		if ( empty( $transients ) )
+			return;
+		
+		$tmp = $transients;
+		if ( array_key_exists( 'networks', $tmp ) ) {
+			unset( $tmp['networks'] );
+		}
+		$tmp = array_pop( $tmp );
+		printf( __( '<p>The transient status information below was last generated on <strong>%s</strong></p>', 'multisite-comment-management' ), $tmp['checked'] );
+		$this->output_transient_status_table( $transients );
+	}
+	
+	/**
+	 * Prune any comments that were selected for deletion
+	 */
+	function delete_transients() {
+		if ( ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'nonce_not_verified' ) );
+			return;
+		}
+		if ( ! current_user_can( 'manage_sites' ) ) {
+			add_action( 'started-ms-comment-mgmt-page', array( $this, 'no_user_permissions' ) );
+			return;
+		}
+		
+		global $wpdb;
+		
+		foreach ( $_POST['ms-comment-mgmt']['transients'] as $k => $v ) {
+			if ( 'networks' == $k ) {
+				$this->delete_site_transients( $v );
+				continue;
+			}
+			
+			$k = intval( $k );
+			
+			$this->did_pruning_message[] = sprintf( '<p>Preparing to review transients on the site with an ID of %d</p>', $k );
+			
+			$status = null;
+			
+			if ( isset( $v['all'] ) && intval( $v['all'] ) > 0 ) {
+				$status = 'all';
+			} else if ( isset( $v['expired'] ) && intval( $v['expired'] ) > 0 ) {
+				$status = 'expired';
+			}
+			
+			if ( ! empty( $status ) ) {
+				switch_to_blog( $k );
+				
+				if ( 'all' == $status ) {
+					$query = "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_%'";
+				} else {
+					$q = $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d", '_transient_timeout_%', current_time( 'timestamp' ) );
+					$opts = array();
+					foreach ( $wpdb->get_col( $q ) as $o ) {
+						$opts[] = $o;
+						$opts[] = str_replace( '_timeout', '', $o );
+					}
+					
+					$placeholders = array_fill( 0, count( $opts ), '%s' );
+					$placeholders = implode( ', ', $placeholders );
+					$query = "SELECT option_id FROM {$wpdb->options} WHERE option_name IN ( {$placeholders} )";
+					$query = $wpdb->prepare( $query, $opts );
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+					
+					$query = "DELETE FROM {$wpdb->options} WHERE option_id IN ( $query )";
+					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+				}
+				
+				/*$msg = $wpdb->query( $query );
+				if ( is_wp_error( $msg ) ) {
+					$msg = $msg->get_error_message();
+				}
+				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );*/
+				
+				restore_current_blog();
+			}
+		}
+		
+		delete_site_option( 'ms-comment-management-transient-status' );
+		
+		add_action( 'did-multisite-transients-prune', array( $this, 'did_multisite_comments_prune_message' ) );
+	}
+	
+	/**
+	 * Remove any necessary site transients
+	 */
+	function delete_site_transients( $transients=array() ) {
+		if ( empty( $transients ) )
+			return;
+		
+		global $wpdb;
+		
+		foreach ( $transients as $network_id=>$options ) {
+			$network_id = intval( $network_id );
+			$this->did_pruning_message[] = sprintf( '<p>Preparing to review site transients on the network with an ID of %d</p>', $network_id );
+			
+			if ( isset( $options['all'] ) && intval( $options['all'] ) > 0 ) {
+				$query = "DELETE FROM {$wpdb->sitemeta} WHERE option_name LIKE %s AND site_id=%d";
+				$query = $wpdb->prepare( $query, '_site_transient_%', $network_id );
+			} else if ( isset( $options['expired'] ) && intval( $options['expired'] ) > 0 ) {
+				$query = "SELECT option_name FROM {$wpdb->sitemeta} WHERE option_name LIKE %s AND option_value < %d AND site_id=%d";
+				$option_names = $wpdb->prepare( $query, '_site_transient_timeout_%', current_time( 'timestamp' ), $network_id );
+				$delete = array();
+				foreach ( $option_names as $o ) {
+					$delete[] = $o;
+					$delete[] = str_replace( '_timeout', '', $o );
+				}
+				$placeholders = array_fill( 0, count( $delete ), '%s' );
+				$placeholders = implode( ', ', $placeholders );
+				
+				$query = "SELECT meta_id FROM {$wpdb->sitemeta} WHERE meta_key IN ( {$placeholders} ) AND site_id=%d";
+				$query = $wpdb->prepare( $query, $delete );
+				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+				
+				$query = "DELETE FROM {$wpdb->sitemeta} WHERE option_id IN ( $query )";
+			}
+			
+			$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+			
+			/*$msg = $wpdb->query( $query );
+			if ( is_wp_error( $msg ) ) {
+				$msg = $msg->get_error_message();
+			}
+			$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );*/
+			
+		}
+	}
+	
+	/**
+	 * Output a table showing the current transient status
+	 */
+	function output_transient_status_table( $transients=array(), $blogs=true ) {
+		if ( empty( $transients ) ) 
+			return;
+		
+		if ( array_key_exists( 'networks', $transients ) ) {
+			$this->output_transient_status_table( $transients['networks'], false );
+			unset( $transients['networks'] );
+		}
+		
+		$tmp = $transients;
+		$tmp = array_shift( $tmp );
+		$checked_time = $tmp['checked'];
+		unset( $tmp );
+		
+		printf( '<table id="ms-comment-management-status-data">
+		<caption><h4>%6$s</h4><p><em>%7$s</em></p></caption>
+		<thead>
+			<tr>
+				<th scope="col">%5$s</th>
+				<th scope="col">%1$s</th>
+				<th scope="col"><span class="select-all-button expired"><input type="checkbox"/></span>%2$s</th>
+				<th scope="col"><span class="select-all-button all-transients"><input type="checkbox"/></span>%3$s</th>
+			</tr>
+		</thead>
+		<tfoot>
+			<tr>
+				<th scope="col">%5$s</th>
+				<th scope="col">%1$s</th>
+				<th scope="col"><span class="select-all-button expired"><input type="checkbox"/></span>%2$s</th>
+				<th scope="col"><span class="select-all-button all-transients"><input type="checkbox"/></span>%3$s</th>
+			</tr>
+		</tfoot>
+		<tbody>', 
+			__( 'Name', 'multisite-comment-management' ), 
+			__( 'Expired', 'multisite-comment-management' ), 
+			__( 'All', 'multisite-comment-management' ), 
+			'', 
+			__( 'ID', 'multisite-comment-management' ), 
+			$blogs ? __( 'Normal Transients' ) : __( 'Site/Network Transients' ), 
+			sprintf( __( '*Expired transients were considered expired as of %s' ), $checked_time )
+		);
+		
+		$i = 0;
+		foreach ( $transients as $k=>$c ) {
+			if ( 'networks' == $k )
+				continue;
+			
+			printf( '<tr class="%1$s status-row">
+				<th scope="row" class="site-id">%2$d</th>
+				<td class="site-name">%3$s</td>
+				<td class="expired-status number"><span class="select-one-button expired"><input type="checkbox" name="ms-comment-mgmt[transients]%6$s[%2$d][expired]" value="%4$d"/></span>%4$d</td>
+				<td class="all-transients-status number"><span class="select-one-button all-transients"><input type="checkbox" name="ms-comment-mgmt[transients]%6$s[%2$d][all]" value="%5$d"/></span>%5$d</td>
+			</tr>', 
+				$i%2 ? 'odd-row' : 'even-row', 
+				intval( $k ), 
+				$c['name'], 
+				intval( $c['expired'] ), 
+				intval( $c['all'] ), 
+				$blogs ? '' : '[networks]'
 			);
 			$i++;
 		}
@@ -371,8 +642,13 @@ class Multisite_Comment_Management {
 	function meta_box_scripts() {
 ?>
 		<script>jQuery(  document).ready( function(){ 
+			var MSCMavoidUncheckingAll = false;
+			
 			postboxes.add_postbox_toggles( pagenow ); 
 			jQuery( '.select-all-button input[type="checkbox"]' ).on( 'change', function() {
+				if ( true === MSCMavoidUncheckingAll )
+					return false;
+				
 				if ( jQuery( this ).parent().hasClass( 'spam' ) ) {
 					jQuery( '.select-one-button.spam input[type="checkbox"], .select-all-button.spam input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
 				} else if ( jQuery( this ).parent().hasClass( 'unapproved' ) ) {
@@ -386,6 +662,43 @@ class Multisite_Comment_Management {
 							return;
 						}
 					}
+				} else if ( jQuery( this ).parent().hasClass( 'expired' ) ) {
+					jQuery(this).closest( 'table' ).find( '.select-one-button.expired input[type="checkbox"], .select-all-button.expired input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+				} else if ( jQuery( this ).parent().hasClass( 'all-transients' ) ) {
+					jQuery(this).closest( 'table' ).find( '.select-one-button.all-transients input[type="checkbox"], .select-all-button.all-transients input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+					if ( jQuery(this).closest( 'table' ).find( 'thead .select-all-button.all-transients input[type="checkbox"]' ).first().is( ':checked' ) ) {
+						var confirmSelect = confirm( 'Are you sure you want to delete all transients, even those that have not yet expired?' );
+						if ( confirmSelect == false ) {
+							jQuery(this).closest( 'table' ).find( '.select-all-button.all-transients, .select-one-button.all-transients' ).find( 'input[type="checkbox"]' ).prop( 'checked', false );
+							return;
+						}
+					}
+				}
+			} );
+			
+			jQuery( '.select-one-button input[type="checkbox"]' ).on( 'change', function() {
+				var s = null;
+				if ( jQuery( this ).parent().hasClass( 'spam' ) ) {
+					s = 'spam';
+				} else if ( jQuery( this ).parent().hasClass( 'unapproved' ) ) {
+					s = 'unapproved';
+				} else if ( jQuery( this ).parent().hasClass( 'approved' ) ) {
+					s = 'approved';
+				} else if ( jQuery( this ).parent().hasClass( 'expired' ) ) {
+					s = 'expired';
+				} else if ( jQuery( this ).parent().hasClass( 'all-transients' ) ) {
+					s = 'all-transients';
+				}
+				
+				if ( null === s ) {
+					return false;
+				}
+				
+				if ( jQuery( this ).closest( 'table' ).find( 'thead .select-all-button.' + s + ' input[type="checkbox"]' ).is( ':checked' ) ) {
+					MSCMavoidUncheckingAll = true;
+					jQuery( this ).closest( 'table' ).find( '.select-all-button.' + s + ' input[type="checkbox"]' ).prop( 'checked', false );
+					MSCMavoidUncheckingAll = false;
+					return false;
 				}
 			} );
 		});</script>

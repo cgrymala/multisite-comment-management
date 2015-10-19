@@ -470,19 +470,20 @@ class Multisite_Comment_Management {
 					
 					$placeholders = array_fill( 0, count( $opts ), '%s' );
 					$placeholders = implode( ', ', $placeholders );
-					$query = "SELECT option_id FROM {$wpdb->options} WHERE option_name IN ( {$placeholders} )";
+					$query = "SELECT tbl2.option_id FROM {$wpdb->options} tbl2 WHERE tbl2.option_name IN ( {$placeholders} )";
 					$query = $wpdb->prepare( $query, $opts );
 					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
 					
-					$query = "DELETE FROM {$wpdb->options} WHERE option_id IN ( $query )";
+					$query = "DELETE FROM {$wpdb->options} WHERE option_name IN ( {$placeholders} )";
+					$query = $wpdb->prepare( $query, $opts );
 					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
 				}
 				
-				/*$msg = $wpdb->query( $query );
+				$msg = $wpdb->query( $query );
 				if ( is_wp_error( $msg ) ) {
 					$msg = $msg->get_error_message();
 				}
-				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );*/
+				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );
 				
 				restore_current_blog();
 			}
@@ -507,11 +508,14 @@ class Multisite_Comment_Management {
 			$this->did_pruning_message[] = sprintf( '<p>Preparing to review site transients on the network with an ID of %d</p>', $network_id );
 			
 			if ( isset( $options['all'] ) && intval( $options['all'] ) > 0 ) {
-				$query = "DELETE FROM {$wpdb->sitemeta} WHERE option_name LIKE %s AND site_id=%d";
+				$query = "DELETE FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND site_id=%d";
 				$query = $wpdb->prepare( $query, '_site_transient_%', $network_id );
 			} else if ( isset( $options['expired'] ) && intval( $options['expired'] ) > 0 ) {
-				$query = "SELECT option_name FROM {$wpdb->sitemeta} WHERE option_name LIKE %s AND option_value < %d AND site_id=%d";
-				$option_names = $wpdb->prepare( $query, '_site_transient_timeout_%', current_time( 'timestamp' ), $network_id );
+				$query = "SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_value < %d AND site_id=%d";
+				$query = $wpdb->prepare( $query, '_site_transient_timeout_%', current_time( 'timestamp' ), $network_id );
+				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+				
+				$option_names = $wpdb->get_col( $query );
 				$delete = array();
 				foreach ( $option_names as $o ) {
 					$delete[] = $o;
@@ -520,20 +524,20 @@ class Multisite_Comment_Management {
 				$placeholders = array_fill( 0, count( $delete ), '%s' );
 				$placeholders = implode( ', ', $placeholders );
 				
-				$query = "SELECT meta_id FROM {$wpdb->sitemeta} WHERE meta_key IN ( {$placeholders} ) AND site_id=%d";
+				$delete[] = $network_id;
+				
+				$query = "DELETE FROM {$wpdb->sitemeta} WHERE meta_key IN ( {$placeholders} ) AND site_id=%d";
 				$query = $wpdb->prepare( $query, $delete );
 				$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
-				
-				$query = "DELETE FROM {$wpdb->sitemeta} WHERE option_id IN ( $query )";
 			}
 			
 			$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
 			
-			/*$msg = $wpdb->query( $query );
+			$msg = $wpdb->query( $query );
 			if ( is_wp_error( $msg ) ) {
 				$msg = $msg->get_error_message();
 			}
-			$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );*/
+			$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', print_r( $msg, true ) );
 			
 		}
 	}

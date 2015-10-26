@@ -3,8 +3,6 @@
  * Implement the class to handle listing comment stats
  */
 class MS_Comment_Status_List_Table extends WP_List_Table {
-	public $comments = array();
-	
 	function get_columns() {
 		return apply_filters( 'ms-comment-status-list-table-columns', array(
 			'id'         => __( 'ID', 'multisite-comment-management' ), 
@@ -12,7 +10,13 @@ class MS_Comment_Status_List_Table extends WP_List_Table {
 			'spam'       => sprintf( '<label class="number"><span class="select-all-button %2$s"><input type="checkbox"/></span>%1$s</label>', __( 'Spam', 'multisite-comment-management' ), 'spam' ), 
 			'unapproved' => sprintf( '<label class="number"><span class="select-all-button %2$s"><input type="checkbox"/></span>%1$s</label>', __( 'Unapproved', 'multisite-comment-management' ), 'unapproved' ), 
 			'approved'   => sprintf( '<label class="number"><span class="select-all-button %2$s"><input type="checkbox"/></span>%1$s</label>', __( 'Approved', 'multisite-comment-management' ), 'approved' ), 
-			/*'raw'        => __( 'Raw Data', 'multisite-comment-management' ), */
+			'raw'        => __( 'Raw Data', 'multisite-comment-management' ), 
+		) );
+	}
+	
+	function get_hidden_columns() {
+		return apply_filters( 'ms-comment-status-list-table-hidden', array(
+			'raw', 
 		) );
 	}
 	
@@ -26,15 +30,12 @@ class MS_Comment_Status_List_Table extends WP_List_Table {
 	function get_column_info() {
 		return array(
 			$this->get_columns(), 
-			array(), 
+			$this->get_hidden_columns(), 
 			$this->get_sortable_columns(),
 		);
 	}
 	
 	function prepare_items( $comments=array() ) {
-		$columns = $this->get_columns();
-		$hidden = array();
-		$sortable = $this->get_sortable_columns();
 		$this->_column_headers = $this->get_column_info();
 		usort( $comments, array( &$this, 'usort_reorder' ) );
 		$this->items = $comments;

@@ -394,9 +394,10 @@ class Multisite_Comment_Management {
 		foreach ( $sites as $site ) {
 			switch_to_blog( $site );
 			$transients[$site] = array(
-				'name' => get_bloginfo( 'name', 'display' ),
+				'id'      => intval( $site ), 
+				'name'    => get_bloginfo( 'name', 'display' ),
 				'expired' => 0, 
-				'all' => 0,
+				'all'     => 0,
 				'checked' => $current_mysql
 			);
 			$transients[$site]['expired'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d", '_transient_timeout_%', $current_time ) );
@@ -408,9 +409,10 @@ class Multisite_Comment_Management {
 		if ( ! is_wp_error( $sites ) && ! empty( $sites ) ) {
 			foreach( $sites as $site ) {
 				$transients['networks'][$site] = array(
-					'name' => $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->sitemeta} WHERE site_id=%d AND meta_key=%s", $site, 'site_name' ) ), 
+					'id'      => intval( $site ), 
+					'name'    => $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->sitemeta} WHERE site_id=%d AND meta_key=%s", $site, 'site_name' ) ), 
 					'expired' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_value < %d", '_site_transient_timeout_%', $current_time ) ), 
-					'all' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s", '_site_transient_%', '_site_transient_timeout_%' ) ), 
+					'all'     => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s", '_site_transient_%', '_site_transient_timeout_%' ) ), 
 					'checked' => $current_mysql
 				);
 			}
@@ -563,6 +565,32 @@ class Multisite_Comment_Management {
 	function output_transient_status_table( $transients=array(), $blogs=true ) {
 		if ( empty( $transients ) ) 
 			return;
+		
+		if ( ! class_exists( 'WP_List_Table' ) ) {
+			require_once( ABSPATH . 'wp-admin/includes/class-wp-list-table.php' );
+		}
+		
+		require_once( plugin_dir_path( __FILE__ ) . '/_inc/class-ms-transient-status-list-table.php' );
+		
+		$tmp = $transients;
+		$tmp = array_shift( $tmp );
+		$checked_time = $tmp['checked'];
+		unset( $tmp );
+		
+		if ( array_key_exists( 'networks', $transients ) ) {
+			printf( '<h4>%1$s</h4><p><em>%2$s</em></p>', __( 'Site/Network Transients', 'multisite-comment-management' ), sprintf( __( '*Expired transients were considered expired as of %s', 'multisite-comment-management' ), $checked_time ) );
+			$table = new MS_Transient_Status_List_Table();
+			$table->prepare_items( $transients['networks'] );
+			$table->display();
+			unset( $transients['networks'] );
+		}
+		
+		printf( '<h4>%1$s</h4><p><em>%2$s</em></p>', __( 'Normal Transients', 'multisite-comment-management' ), sprintf( __( '*Expired transients were considered expired as of %s', 'multisite-comment-management' ), $checked_time ) );
+		$table = new MS_Transient_Status_List_Table();
+		$table->prepare_items( $transients );
+		$table->display();
+		
+		return;
 		
 		if ( array_key_exists( 'networks', $transients ) ) {
 			$this->output_transient_status_table( $transients['networks'], false );

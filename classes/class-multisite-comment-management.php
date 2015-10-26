@@ -159,11 +159,12 @@ class Multisite_Comment_Management {
 		foreach ( $sites as $site ) {
 			switch_to_blog( $site );
 			$comments[$site] = array(
-				'name' => get_bloginfo( 'name', 'display' ),
-				'spam' => 0, 
+				'id'         => intval( $site ), 
+				'name'       => get_bloginfo( 'name', 'display' ),
+				'spam'       => 0, 
 				'unapproved' => 0,
-				'approved' => 0, 
-				'checked' => current_time( 'mysql' ), 
+				'approved'   => 0, 
+				'checked'    => current_time( 'mysql' ), 
 			);
 			$comments[$site]['spam'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved=%s", 'spam' ) );
 			$comments[$site]['unapproved'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved=%d", 0 ) );
@@ -298,6 +299,20 @@ class Multisite_Comment_Management {
 	function output_status_table( $comments=array() ) {
 		if ( empty( $comments ) )
 			return;
+		
+		printf( '<p><strong>%1$s</strong></p>', __( 'List of All Comments Found In This Installation', 'multisite-comment-management' ) );
+		
+		if ( ! class_exists( 'WP_List_Table' ) ) {
+			require_once( ABSPATH . 'wp-admin/includes/class-wp-list-table.php' );
+		}
+		
+		require_once( plugin_dir_path( __FILE__ ) . '/_inc/class-ms-comment-status-list-table.php' );
+		
+		$table = new MS_Comment_Status_List_Table();
+		$table->prepare_items( $comments );
+		$table->display();
+		
+		return;
 		
 		printf( '<table id="ms-comment-management-status-data">
 		<caption><h4>%6$s</h4></caption>
@@ -753,7 +768,7 @@ class Multisite_Comment_Management {
 	overflow: hidden;
 }
 
-#ms-comment-mgmt-page-wrapper table {
+/*#ms-comment-mgmt-page-wrapper table {
 	width: 100%;
 	max-width: 100%;
 }
@@ -788,12 +803,25 @@ class Multisite_Comment_Management {
 #ms-comment-mgmt-page-wrapper .even-row td {
 	background: #fff;
 	color: #666;
+}*/
+
+#ms-comment-mgmt-page-wrapper .number {
+	display: block;
+	text-align: right;
+	margin: 0;
+	padding: 0;
+}
+
+#ms-comment-mgmt-page-wrapper td.column-spam:hover, 
+#ms-comment-mgmt-page-wrapper td.column-unapproved:hover, 
+#ms-comment-mgmt-page-wrapper td.column-approved:hover {
+	background: #ccc;
 }
 
 #ms-comment-mgmt-page-wrapper .select-all-button, 
 #ms-comment-mgmt-page-wrapper .select-one-button {
-	float: left;
-	margin: 0;
+	float: right;
+	margin: 0 0 0 10px;
 	padding: 0;
 }
 </style>

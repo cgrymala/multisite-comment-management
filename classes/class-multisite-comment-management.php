@@ -54,7 +54,7 @@ class Multisite_Comment_Management {
 			/* id       */ 'ms-comment-mgmt-status', 
 			/* title    */ __( 'Comment Status', 'multisite-comment-management' ), 
 			/* callback */ array( $this, 'comment_status_metabox' ), 
-			/* screen   */ 'ms-comment-mgmt', 
+			/* screen   */ $this->pagehook, 
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
@@ -62,7 +62,7 @@ class Multisite_Comment_Management {
 			/* id       */ 'ms-comment-mgmt-transients', 
 			/* title    */ __( 'Transient Management', 'multisite-comment-management' ), 
 			/* callback */ array( $this, 'transient_status_metabox' ), 
-			/* screen   */ 'ms-comment-mgmt', 
+			/* screen   */ $this->pagehook, 
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
@@ -93,7 +93,7 @@ class Multisite_Comment_Management {
 		
 		echo '<div id="poststuff" class="metabox-holder' . ( 2 == $screen_layout_columns ? ' has-right-sidebar' : ' has-no-sidebar' ) . '">';
 		echo '<div class="postbox-container">';
-		do_meta_boxes( 'ms-comment-mgmt', 'normal', null );
+		do_meta_boxes( $this->pagehook, 'normal', null );
 		echo '</div>';
 		echo '</div>';
 		

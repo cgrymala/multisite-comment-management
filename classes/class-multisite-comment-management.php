@@ -7,6 +7,7 @@
 class Multisite_Comment_Management {
 	public $version = '0.1a';
 	public $plugin_name = '';
+	public $pagehook = '';
 	
 	/**
 	 * Instantiate the object
@@ -32,7 +33,7 @@ class Multisite_Comment_Management {
 	 * Register the plugin options/action page
 	 */
 	function network_admin_menu() {
-		add_submenu_page(
+		$this->pagehook = add_submenu_page(
 			/* parent_slug */'sites.php', 
 			/* page_title */ $this->plugin_name, 
 			/* menu_title */ $this->plugin_name, 
@@ -42,7 +43,7 @@ class Multisite_Comment_Management {
 		);
 		
 		add_action( 'started-ms-comment-mgmt-page', array( $this, 'do_admin_styles' ) );
-		add_action( 'admin_init', array( $this, 'add_meta_boxes' ) );
+		add_action( 'load-' . $this->pagehook, array( $this, 'add_meta_boxes' ) );
 	}
 	
 	/**
@@ -83,16 +84,21 @@ class Multisite_Comment_Management {
 	 * Output the main body of the options page
 	 */
 	function do_option_page_content() {
-		echo '<div id="poststuff"><div id="post-body">';
+		global $screen_layout_columns;
 		do_action( 'started-ms-comment-mgmt-page' );
 		printf( '<form method="post" action="%s">', network_admin_url( 'sites.php?page=ms-comment-mgmt' ) );
 		wp_nonce_field( 'ms-comment-mgmt', '_mscm_nonce' );
+		wp_nonce_field( 'closedpostboxes', 'closedpostboxesnonce', false );
+		wp_nonce_field( 'meta-box-order', 'meta-box-order-nonce', false );
 		
+		echo '<div id="poststuff" class="metabox-holder' . ( 2 == $screen_layout_columns ? ' has-right-sidebar' : ' has-no-sidebar' ) . '">';
+		echo '<div class="postbox-container">';
 		do_meta_boxes( 'ms-comment-mgmt', 'normal', null );
+		echo '</div>';
+		echo '</div>';
 		
 		echo '</form>';
 		
-		echo '</div></div>';
 		
 		/* Enqueue WordPress' script for handling the meta boxes */
 		wp_enqueue_script( 'postbox' );
@@ -166,9 +172,13 @@ class Multisite_Comment_Management {
 				'approved'   => 0, 
 				'checked'    => current_time( 'mysql' ), 
 			);
-			$comments[$site]['spam'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved=%s", 'spam' ) );
-			$comments[$site]['unapproved'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved=%d", 0 ) );
-			$comments[$site]['approved'] = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_approved=%d", 1 ) );
+			$q = $wpdb->prepare( "SELECT COUNT(*) total, SUM(CASE WHEN comment_approved=%s THEN 1 ELSE 0 END) spam, SUM(CASE WHEN comment_approved='%d' THEN 1 ELSE 0 END) unapproved, SUM(CASE WHEN comment_approved='%d' THEN 1 ELSE 0 END) approved FROM {$wpdb->comments}", 'spam', 0, 1 );
+			$vars = $wpdb->get_row( $q );
+			if ( ! is_wp_error( $vars ) && is_object( $vars ) ) {
+				$comments[$site]['spam'] = $vars->spam;
+				$comments[$site]['unapproved'] = $vars->unapproved;
+				$comments[$site]['approved'] = $vars->approved;
+			}
 			restore_current_blog();
 		}
 		
@@ -202,7 +212,7 @@ class Multisite_Comment_Management {
 	 * Prune any comments that were selected for deletion
 	 */
 	function delete_comments() {
-		if ( ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
+		if ( ! isset( $_POST['_mscm_nonce'] ) || ! wp_verify_nonce( $_POST['_mscm_nonce'], 'ms-comment-mgmt' ) ) {
 			add_action( 'started-ms-comment-mgmt-page', array( $this, 'nonce_not_verified' ) );
 			return;
 		}
@@ -227,11 +237,11 @@ class Multisite_Comment_Management {
 			}
 			if ( isset( $v['unapproved'] ) && intval( $v['unapproved'] ) > 0 ) {
 				$status[] = 0;
-				$status_placeholders[] = '%d';
+				$status_placeholders[] = '%s';
 			}
 			if ( isset( $v['approved'] ) && intval( $v['approved'] ) > 0 ) {
 				$status[] = 1;
-				$status_placeholders[] = '%d';
+				$status_placeholders[] = '%s';
 			}
 			if ( ! empty( $status ) ) {
 				switch_to_blog( $k );
@@ -447,6 +457,9 @@ class Multisite_Comment_Management {
 			add_action( 'started-ms-comment-mgmt-page', array( $this, 'nonce_not_verified' ) );
 			return;
 		}
+		if ( ! isset( $_POST['ms-comment-mgmt']['transients'] ) || empty( $_POST['ms-comment-mgmt']['transients'] ) ) {
+			return;
+		}
 		if ( ! current_user_can( 'manage_sites' ) ) {
 			add_action( 'started-ms-comment-mgmt-page', array( $this, 'no_user_permissions' ) );
 			return;
@@ -454,12 +467,21 @@ class Multisite_Comment_Management {
 		
 		global $wpdb;
 		
-		foreach ( $_POST['ms-comment-mgmt']['transients'] as $k => $v ) {
-			if ( 'networks' == $k ) {
-				$this->delete_site_transients( $v );
-				continue;
-			}
-			
+		$transients = $_POST['ms-comment-mgmt']['transients'];
+		
+		$nettrans = isset( $transients['networks'] ) ? $transients['networks'] : false;
+		unset( $transients['networks'] );
+		
+		if ( ! empty( $nettrans ) )
+			$this->delete_site_transients( $nettrans );
+		
+		if ( empty( $transients ) ) {
+			delete_site_option( 'ms-comment-management-transient-status' );
+			add_action( 'did-multisite-transients-prune', array( $this, 'did_multisite_comments_prune_message' ) );
+			return;
+		}
+		
+		foreach ( $transients as $k => $v ) {
 			$k = intval( $k );
 			
 			$this->did_pruning_message[] = sprintf( '<p>Preparing to review transients on the site with an ID of %d</p>', $k );
@@ -484,16 +506,19 @@ class Multisite_Comment_Management {
 						$opts[] = $o;
 						$opts[] = str_replace( '_timeout', '', $o );
 					}
-					
-					$placeholders = array_fill( 0, count( $opts ), '%s' );
-					$placeholders = implode( ', ', $placeholders );
-					$query = "SELECT tbl2.option_id FROM {$wpdb->options} tbl2 WHERE tbl2.option_name IN ( {$placeholders} )";
-					$query = $wpdb->prepare( $query, $opts );
-					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
-					
-					$query = "DELETE FROM {$wpdb->options} WHERE option_name IN ( {$placeholders} )";
-					$query = $wpdb->prepare( $query, $opts );
-					$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+					if ( ! empty( $opts ) ) {
+						$placeholders = array_fill( 0, count( $opts ), '%s' );
+						$placeholders = implode( ', ', $placeholders );
+						$query = "SELECT tbl2.option_id FROM {$wpdb->options} tbl2 WHERE tbl2.option_name IN ( {$placeholders} )";
+						$query = $wpdb->prepare( $query, $opts );
+						$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+						
+						$query = "DELETE FROM {$wpdb->options} WHERE option_name IN ( {$placeholders} )";
+						$query = $wpdb->prepare( $query, $opts );
+						$this->did_pruning_message[] = sprintf( '<pre><code>%s</code></pre>', $query );
+					} else {
+						$this->did_pruning_message[] = __( '<p>For some reason, no transients were found to be deleted.</p>', 'multisite-comment-management' );
+					}
 				}
 				
 				$msg = $wpdb->query( $query );
@@ -580,7 +605,7 @@ class Multisite_Comment_Management {
 		if ( array_key_exists( 'networks', $transients ) ) {
 			printf( '<h4>%1$s</h4><p><em>%2$s</em></p>', __( 'Site/Network Transients', 'multisite-comment-management' ), sprintf( __( '*Expired transients were considered expired as of %s', 'multisite-comment-management' ), $checked_time ) );
 			$table = new MS_Transient_Status_List_Table();
-			$table->prepare_items( $transients['networks'] );
+			$table->prepare_items( $transients['networks'], true );
 			$table->display();
 			unset( $transients['networks'] );
 		}
@@ -688,10 +713,11 @@ class Multisite_Comment_Management {
 	 */
 	function meta_box_scripts() {
 ?>
-		<script>jQuery(  document).ready( function(){ 
+		<script>jQuery( document ).ready( function(){ 
 			var MSCMavoidUncheckingAll = false;
 			
-			postboxes.add_postbox_toggles( pagenow ); 
+			postboxes.add_postbox_toggles( '<?php echo $this->pagehook ?>' ); 
+			
 			jQuery( '.select-all-button input[type="checkbox"]' ).on( 'change', function() {
 				if ( true === MSCMavoidUncheckingAll )
 					return false;
@@ -711,12 +737,12 @@ class Multisite_Comment_Management {
 					}
 				} else if ( jQuery( this ).parent().hasClass( 'expired' ) ) {
 					jQuery(this).closest( 'table' ).find( '.select-one-button.expired input[type="checkbox"], .select-all-button.expired input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
-				} else if ( jQuery( this ).parent().hasClass( 'all-transients' ) ) {
-					jQuery(this).closest( 'table' ).find( '.select-one-button.all-transients input[type="checkbox"], .select-all-button.all-transients input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
-					if ( jQuery(this).closest( 'table' ).find( 'thead .select-all-button.all-transients input[type="checkbox"]' ).first().is( ':checked' ) ) {
+				} else if ( jQuery( this ).parent().hasClass( 'all' ) ) {
+					jQuery(this).closest( 'table' ).find( '.select-one-button.all input[type="checkbox"], .select-all-button.all input[type="checkbox"]' ).prop( 'checked', jQuery( this ).is( ':checked' ) );
+					if ( jQuery(this).closest( 'table' ).find( 'thead .select-all-button.all input[type="checkbox"]' ).first().is( ':checked' ) ) {
 						var confirmSelect = confirm( 'Are you sure you want to delete all transients, even those that have not yet expired?' );
 						if ( confirmSelect == false ) {
-							jQuery(this).closest( 'table' ).find( '.select-all-button.all-transients, .select-one-button.all-transients' ).find( 'input[type="checkbox"]' ).prop( 'checked', false );
+							jQuery(this).closest( 'table' ).find( '.select-all-button.all, .select-one-button.all' ).find( 'input[type="checkbox"]' ).prop( 'checked', false );
 							return;
 						}
 					}
@@ -733,8 +759,8 @@ class Multisite_Comment_Management {
 					s = 'approved';
 				} else if ( jQuery( this ).parent().hasClass( 'expired' ) ) {
 					s = 'expired';
-				} else if ( jQuery( this ).parent().hasClass( 'all-transients' ) ) {
-					s = 'all-transients';
+				} else if ( jQuery( this ).parent().hasClass( 'all' ) ) {
+					s = 'all';
 				}
 				
 				if ( null === s ) {

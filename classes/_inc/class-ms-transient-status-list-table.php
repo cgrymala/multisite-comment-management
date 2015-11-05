@@ -3,6 +3,8 @@
  * Implement the class to handle listing transient stats
  */
 class MS_Transient_Status_List_Table extends WP_List_Table {
+	var $doing_network = false;
+	
 	function get_columns() {
 		return apply_filters( 'ms-transient-status-list-table-columns', array(
 			'id'      => __( 'ID', 'multisite-comment-management' ), 
@@ -34,10 +36,11 @@ class MS_Transient_Status_List_Table extends WP_List_Table {
 		);
 	}
 	
-	function prepare_items( $transients ) {
+	function prepare_items( $transients, $is_network=false ) {
 		$this->_column_headers = $this->get_column_info();
 		usort( $transients, array( &$this, 'usort_reorder' ) );
 		$this->items = $transients;
+		$this->doing_network = $is_network;
 	}
 	
 	function column_default( $item, $column_name=null ) {
@@ -50,7 +53,7 @@ class MS_Transient_Status_List_Table extends WP_List_Table {
 				break;
 			case 'expired' : 
 			case 'all' : 
-				return sprintf( '<label class="number"><span class="select-one-button %1$s"><input type="checkbox" name="ms-comment-mgmt[transients][%2$d][%1$s]" value="%4$d"/></span>%4$d</label>', $column_name, intval( $item['id'] ), '', intval( $item[$column_name] ) );
+				return sprintf( '<label class="number"><span class="select-one-button %1$s"><input type="checkbox" name="ms-comment-mgmt[transients]%5$s[%2$d][%1$s]" value="%4$d"/></span>%4$d</label>', $column_name, intval( $item['id'] ), '', intval( $item[$column_name] ), $this->doing_network ? '[networks]' : '' );
 				break;
 			default : 
 				return esc_attr( $item[$column_name] );

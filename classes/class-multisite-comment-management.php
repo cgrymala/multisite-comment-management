@@ -421,8 +421,8 @@ class Multisite_Comment_Management {
 				$transients['networks'][$site] = array(
 					'id'      => intval( $site ), 
 					'name'    => $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->sitemeta} WHERE site_id=%d AND meta_key=%s", $site, 'site_name' ) ), 
-					'expired' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_value < %d", '_site_transient_timeout_%', $current_time ) ), 
-					'all'     => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s", '_site_transient_%', '_site_transient_timeout_%' ) ), 
+					'expired' => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_value < %d AND site_id=%d", '_site_transient_timeout_%', $current_time, $site ) ), 
+					'all'     => $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s AND meta_key NOT LIKE %s AND site_id=%d", '_site_transient_%', '_site_transient_timeout_%', $site ) ), 
 					'checked' => $current_mysql
 				);
 			}

@@ -121,7 +121,7 @@ class Multisite_Comment_Management {
 	/**
 	 * Output any leading text/information on the options/action page
 	 */
-	function options_page( $page='ms-comment-mgmt' ) {
+	function options_page( $page='' ) {
 		$this->do_management();
 		echo '<div class="wrap" id="ms-comment-mgmt-page-wrapper"><div id="icon-tools" class="icon32"></div>';
 		printf( '<h2>%s</h2>', $this->plugin_name );
@@ -134,7 +134,7 @@ class Multisite_Comment_Management {
 	 * Output the Comment Management page
 	 */
 	function comment_management_page() {
-		$this->options_page();
+		$this->options_page( 'ms-comment-mgmt' );
 	}
 	
 	/**
@@ -161,9 +161,15 @@ class Multisite_Comment_Management {
 	/**
 	 * Output the main body of the options page
 	 */
-	function do_option_page_content( $page='ms-comment-mgmt' ) {
+	function do_option_page_content( $page='' ) {
 		global $screen_layout_columns;
 		do_action( 'started-ms-comment-mgmt-page' );
+		
+		if ( empty( $page ) ) {
+			$this->do_intro_page_content();
+			return;
+		}
+		
 		printf( '<form method="post" action="%s">', network_admin_url( 'admin.php?page=' . $page ) );
 		wp_nonce_field( 'ms-comment-mgmt', '_mscm_nonce' );
 		wp_nonce_field( 'closedpostboxes', 'closedpostboxesnonce', false );
@@ -198,6 +204,19 @@ class Multisite_Comment_Management {
 		add_screen_option( 'layout_columns', array( 'max' => 2, 'default' => 2 ) );
 		
 		add_action( 'admin_print_footer_scripts', array( $this, 'meta_box_scripts' ) );
+	}
+	
+	/**
+	 * Output a little bit of intro info about this plugin
+	 */
+	function do_intro_page_content() {
+		_e( '<p>This plugin offers a handful of useful tools for managing large WordPress Multisite installations.</p>' );
+		echo '<ul>';
+		_e( '<li><strong>Comment Management:</strong> Here, you have the ability to prune spam comments, delete unapproved comments and even delete all comments from multiple sites at once.</li>' );
+		_e( '<li><strong>Transients Management:</strong> Here, you have the ability to manage network transients for all of your networks and the ability to manage normal transients on all of your sites from a single location. You can see how many transients are expired, and how many total transients there are, and you can optionally delete them from multiple sites and networks at once.</li>' );
+		_e( '<li><strong>Database Management:</strong> This page is intended to give you the opportunity to identify and prune orphaned tables within your installation.</li>' );
+		_e( '<li><strong>Large Files Management:</strong> This page is intended to give you the opportunity to identify and optionally delete any large files within your file system (such as large backups that are hiding in various sub-folders, etc.)</li>' );
+		echo '</ul>';
 	}
 
 	/**

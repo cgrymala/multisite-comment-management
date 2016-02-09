@@ -1,6 +1,6 @@
 <?php
 /*
-Plugin Name: Multisite Comment Management
+Plugin Name: Multisite Management Tools
 Description: Allows the deletion of spam/unapproved comments from an entire WordPress multisite network
 Version:     0.1a
 Author:      Curtiss Grymala

@@ -7,7 +7,7 @@
 class Multisite_Comment_Management {
 	public $version = '0.1a';
 	public $plugin_name = '';
-	public $pagehook = '';
+	public $pagehooks = array();
 	
 	/**
 	 * Instantiate the object
@@ -16,7 +16,7 @@ class Multisite_Comment_Management {
 	 * @uses add_action() to hook into network_admin_menu to register the options page
 	 */
 	function __construct() {
-		$this->plugin_name = __( 'Multisite Comment Management', 'multisite-comment-management' );
+		$this->plugin_name = __( 'Multisite Management Tools', 'multisite-comment-management' );
 		
 		if ( ! is_multisite() ) {
 			add_action( 'admin_notice', array( $this, 'warn_multisite' ) );
@@ -33,17 +33,51 @@ class Multisite_Comment_Management {
 	 * Register the plugin options/action page
 	 */
 	function network_admin_menu() {
-		$this->pagehook = add_submenu_page(
-			/* parent_slug */'sites.php', 
+		$this->pagehooks['top'] = add_menu_page(
 			/* page_title */ $this->plugin_name, 
-			/* menu_title */ $this->plugin_name, 
+			/* menu_title */ __( 'MS Mgmt Tools', 'multsite-comment-management' ), 
+			/* capability */ 'manage_sites', 
+			/* menu_slug  */ 'ms-mgmt-tools', 
+			/* callback   */ array( $this, 'options_page' ), 
+			/* icon_url   */ 'dashicons-admin-multisite'
+		);
+		$this->pagehooks['comments'] = add_submenu_page(
+			/* parent_slug */'ms-mgmt-tools', 
+			/* page_title */ __( 'Comment Management', 'multisite-comment-management' ), 
+			/* menu_title */ __( 'Comment Management', 'multisite-comment-management' ), 
 			/* capability */ 'manage_sites', 
 			/* menu_slug  */ 'ms-comment-mgmt', 
-			/* callback   */ array( $this, 'options_page' )
+			/* callback   */ array( $this, 'comment_management_page' )
+		);
+		$this->pagehooks['transients'] = add_submenu_page( 
+			/* parent_slug */'ms-mgmt-tools', 
+			/* page_title */ __( 'Transient Management', 'multisite-comment-management' ), 
+			/* menu_title */ __( 'Transient Management', 'multisite-comment-management' ), 
+			/* capability */ 'manage_sites', 
+			/* menu_slug  */ 'ms-transient-mgmt', 
+			/* callback   */ array( $this, 'transient_management_page' )
+		);
+		$this->pagehooks['database'] = add_submenu_page( 
+			/* parent_slug */'ms-mgmt-tools', 
+			/* page_title */ __( 'Database Management', 'multisite-comment-management' ), 
+			/* menu_title */ __( 'Database Management', 'multisite-comment-management' ), 
+			/* capability */ 'manage_sites', 
+			/* menu_slug  */ 'ms-database-mgmt', 
+			/* callback   */ array( $this, 'database_management_page' )
+		);
+		$this->pagehooks['files'] = add_submenu_page( 
+			/* parent_slug */'ms-mgmt-tools', 
+			/* page_title */ __( 'Large Files Management', 'multisite-comment-management' ), 
+			/* menu_title */ __( 'Large Files Management', 'multisite-comment-management' ), 
+			/* capability */ 'manage_sites', 
+			/* menu_slug  */ 'ms-files-mgmt', 
+			/* callback   */ array( $this, 'files_management_page' )
 		);
 		
 		add_action( 'started-ms-comment-mgmt-page', array( $this, 'do_admin_styles' ) );
-		add_action( 'load-' . $this->pagehook, array( $this, 'add_meta_boxes' ) );
+		foreach ( $this->pagehooks as $p ) {
+			add_action( 'load-' . $p, array( $this, 'add_meta_boxes' ) );
+		}
 	}
 	
 	/**
@@ -54,7 +88,7 @@ class Multisite_Comment_Management {
 			/* id       */ 'ms-comment-mgmt-status', 
 			/* title    */ __( 'Comment Status', 'multisite-comment-management' ), 
 			/* callback */ array( $this, 'comment_status_metabox' ), 
-			/* screen   */ $this->pagehook, 
+			/* screen   */ $this->pagehooks['comments'], 
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
@@ -62,7 +96,23 @@ class Multisite_Comment_Management {
 			/* id       */ 'ms-comment-mgmt-transients', 
 			/* title    */ __( 'Transient Management', 'multisite-comment-management' ), 
 			/* callback */ array( $this, 'transient_status_metabox' ), 
-			/* screen   */ $this->pagehook, 
+			/* screen   */ $this->pagehooks['transients'], 
+			/* context  */ 'normal', 
+			/* priority */ 'default'
+		);
+		add_meta_box(
+			/* id       */ 'ms-comment-mgmt-database', 
+			/* title    */ __( 'Database Management', 'multisite-comment-management' ), 
+			/* callback */ array( $this, 'database_status_metabox' ), 
+			/* screen   */ $this->pagehooks['database'], 
+			/* context  */ 'normal', 
+			/* priority */ 'default'
+		);
+		add_meta_box(
+			/* id       */ 'ms-comment-mgmt-files', 
+			/* title    */ __( 'Large Files Management', 'multisite-comment-management' ), 
+			/* callback */ array( $this, 'files_status_metabox' ), 
+			/* screen   */ $this->pagehooks['files'], 
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
@@ -71,29 +121,70 @@ class Multisite_Comment_Management {
 	/**
 	 * Output any leading text/information on the options/action page
 	 */
-	function options_page() {
+	function options_page( $page='ms-comment-mgmt' ) {
 		$this->do_management();
 		echo '<div class="wrap" id="ms-comment-mgmt-page-wrapper"><div id="icon-tools" class="icon32"></div>';
 		printf( '<h2>%s</h2>', $this->plugin_name );
-		$this->do_option_page_content();
+		$this->do_option_page_content( $page );
 		echo '</div>';
 		return;
 	}
 	
 	/**
+	 * Output the Comment Management page
+	 */
+	function comment_management_page() {
+		$this->options_page();
+	}
+	
+	/**
+	 * Output the Transient Management page
+	 */
+	function transient_management_page() {
+		$this->options_page( 'ms-transient-mgmt' );
+	}
+	
+	/**
+	 * Output the Database Management page
+	 */
+	function database_management_page() {
+		$this->options_page( 'ms-database-mgmt' );
+	}
+	
+	/**
+	 * Output the Large Files Management page
+	 */
+	function files_management_page() {
+		$this->options_page( 'ms-files-mgmt' );
+	}
+	
+	/**
 	 * Output the main body of the options page
 	 */
-	function do_option_page_content() {
+	function do_option_page_content( $page='ms-comment-mgmt' ) {
 		global $screen_layout_columns;
 		do_action( 'started-ms-comment-mgmt-page' );
-		printf( '<form method="post" action="%s">', network_admin_url( 'sites.php?page=ms-comment-mgmt' ) );
+		printf( '<form method="post" action="%s">', network_admin_url( 'admin.php?page=' . $page ) );
 		wp_nonce_field( 'ms-comment-mgmt', '_mscm_nonce' );
 		wp_nonce_field( 'closedpostboxes', 'closedpostboxesnonce', false );
 		wp_nonce_field( 'meta-box-order', 'meta-box-order-nonce', false );
 		
 		echo '<div id="poststuff" class="metabox-holder' . ( 2 == $screen_layout_columns ? ' has-right-sidebar' : ' has-no-sidebar' ) . '">';
 		echo '<div class="postbox-container">';
-		do_meta_boxes( $this->pagehook, 'normal', null );
+		switch ( $page ) {
+			case 'ms-transient-mgmt' : 
+				do_meta_boxes( $this->pagehooks['transients'], 'normal', null );
+				break;
+			case 'ms-database-mgmt' : 
+				do_meta_boxes( $this->pagehooks['database'], 'normal', null );
+				break;
+			case 'ms-files-mgmt' : 
+				do_meta_boxes( $this->pagehooks['files'], 'normal', null );
+				break;
+			default :
+				do_meta_boxes( $this->pagehooks['comments'], 'normal', null );
+				break;
+		}
 		echo '</div>';
 		echo '</div>';
 		
@@ -119,6 +210,28 @@ class Multisite_Comment_Management {
 		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-comments]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Comments', 'multisite-comment-management' ) );
 		
 		do_action( 'did-multisite-comments-prune' );
+	}
+	
+	/**
+	 * Output the database status meta box
+	 */
+	function database_status_metabox() {
+		printf( '<p><input type="submit" name="ms-comment-mgmt[check-database]" value="%s" class="button button-secondary"/></p>', __( 'Check Database Status', 'multisite-comment-management' ) );
+		do_action( 'did-multisite-database-check' );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-tables]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Tables', 'multisite-comment-management' ) );
+		
+		do_action( 'did-multisite-database-prune' );
+	}
+	
+	/**
+	 * Output the large files status meta box
+	 */
+	function files_status_metabox() {
+		printf( '<p><input type="submit" name="ms-comment-mgmt[check-files]" value="%s" class="button button-secondary"/></p>', __( 'Check Large Files Status', 'multisite-comment-management' ) );
+		do_action( 'did-multisite-files-check' );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-tables]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Files', 'multisite-comment-management' ) );
+		
+		do_action( 'did-multisite-files-prune' );
 	}
 	
 	/**

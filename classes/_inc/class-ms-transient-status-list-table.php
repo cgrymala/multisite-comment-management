@@ -23,8 +23,10 @@ class MS_Transient_Status_List_Table extends WP_List_Table {
 	
 	function get_sortable_columns() {
 		return apply_filters( 'ms-transient-status-list-table-sortable', array(
-			'id'   => array( 'id', false ), 
+			'id'   => array( 'id', true ), 
 			'name' => array( 'name', false ), 
+			'expired' => array( 'expired', false ), 
+			'all'  => array( 'all', false ), 
 		) );
 	}
 	
@@ -65,7 +67,9 @@ class MS_Transient_Status_List_Table extends WP_List_Table {
 		$orderby = ( ! empty( $_GET['orderby'] ) ) ? $_GET['orderby'] : 'id';
 		$order = ( ! empty($_GET['order'] ) ) ? $_GET['order'] : 'asc';
 		switch( $orderby ) {
-			case 'id' :
+			case 'id' : 
+			case 'expired' : 
+			case 'all' : 
 				$result = intval( $a[$orderby] ) < intval( $b[$orderby] ) ? -1 : ( intval( $a[$orderby] ) > intval( $b[$orderby] ) ? 1 : 0 );
 				break;
 			default :

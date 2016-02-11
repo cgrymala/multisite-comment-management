@@ -30,17 +30,19 @@ class Multisite_Comment_Management {
 	}
 	
 	/**
-	 * Register the plugin options/action page
+	 * Register the plugin options/action pages
 	 */
 	function network_admin_menu() {
+		/* Intro Page */
 		$this->pagehooks['top'] = add_menu_page(
 			/* page_title */ $this->plugin_name, 
-			/* menu_title */ __( 'MS Mgmt Tools', 'multsite-comment-management' ), 
+			/* menu_title */ __( 'Management Tools', 'multsite-comment-management' ), 
 			/* capability */ 'manage_sites', 
 			/* menu_slug  */ 'ms-mgmt-tools', 
 			/* callback   */ array( $this, 'options_page' ), 
-			/* icon_url   */ 'dashicons-admin-multisite'
+			/* icon_url   */ 'dashicons-hammer'
 		);
+		/* Comments Management */
 		$this->pagehooks['comments'] = add_submenu_page(
 			/* parent_slug */'ms-mgmt-tools', 
 			/* page_title */ __( 'Comment Management', 'multisite-comment-management' ), 
@@ -49,6 +51,7 @@ class Multisite_Comment_Management {
 			/* menu_slug  */ 'ms-comment-mgmt', 
 			/* callback   */ array( $this, 'comment_management_page' )
 		);
+		/* Transients Management */
 		$this->pagehooks['transients'] = add_submenu_page( 
 			/* parent_slug */'ms-mgmt-tools', 
 			/* page_title */ __( 'Transient Management', 'multisite-comment-management' ), 
@@ -57,6 +60,7 @@ class Multisite_Comment_Management {
 			/* menu_slug  */ 'ms-transient-mgmt', 
 			/* callback   */ array( $this, 'transient_management_page' )
 		);
+		/* Database/Table Management */
 		$this->pagehooks['database'] = add_submenu_page( 
 			/* parent_slug */'ms-mgmt-tools', 
 			/* page_title */ __( 'Database Management', 'multisite-comment-management' ), 
@@ -65,6 +69,7 @@ class Multisite_Comment_Management {
 			/* menu_slug  */ 'ms-database-mgmt', 
 			/* callback   */ array( $this, 'database_management_page' )
 		);
+		/* Large Files Management */
 		$this->pagehooks['files'] = add_submenu_page( 
 			/* parent_slug */'ms-mgmt-tools', 
 			/* page_title */ __( 'Large Files Management', 'multisite-comment-management' ), 
@@ -89,6 +94,14 @@ class Multisite_Comment_Management {
 			/* title    */ __( 'Comment Status', 'multisite-comment-management' ), 
 			/* callback */ array( $this, 'comment_status_metabox' ), 
 			/* screen   */ $this->pagehooks['comments'], 
+			/* context  */ 'normal', 
+			/* priority */ 'default'
+		);
+		add_meta_box(
+			/* id       */ 'ms-comment-mgmt-transients-network', 
+			/* title    */ __( 'Network Transient Management', 'multisite-comment-management' ), 
+			/* callback */ array( $this, 'network_transient_status_metabox' ), 
+			/* screen   */ $this->pagehooks['transients'], 
 			/* context  */ 'normal', 
 			/* priority */ 'default'
 		);
@@ -248,7 +261,7 @@ class Multisite_Comment_Management {
 	function files_status_metabox() {
 		printf( '<p><input type="submit" name="ms-comment-mgmt[check-files]" value="%s" class="button button-secondary"/></p>', __( 'Check Large Files Status', 'multisite-comment-management' ) );
 		do_action( 'did-multisite-files-check' );
-		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-tables]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Files', 'multisite-comment-management' ) );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-files]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Files', 'multisite-comment-management' ) );
 		
 		do_action( 'did-multisite-files-prune' );
 	}
@@ -260,6 +273,8 @@ class Multisite_Comment_Management {
 		add_action( 'started-ms-comment-mgmt-page', array( $this, 'welcome_message' ) );
 		add_action( 'did-multisite-comments-check', array( $this, 'old_comment_status' ) );
 		add_action( 'did-multisite-transients-check', array( $this, 'old_transient_status' ) );
+		add_action( 'did-multisite-database-check', array( $this, 'old_database_status' ) );
+		add_action( 'did-multisite-files-check', array( $this, 'old_files_status' ) );
 		
 		if ( ! isset( $_POST['ms-comment-mgmt'] ) ) {
 			return;
@@ -279,6 +294,16 @@ class Multisite_Comment_Management {
 			remove_action( 'did-multisite-transients-check', array( $this, 'old_transient_status' ) );
 		} else if ( isset( $_POST['ms-comment-mgmt']['delete-transients'] ) ) {
 			$this->delete_transients();
+		} else if ( isset( $_POST['ms-comment-mgmt']['check-database'] ) ) {
+			add_action( 'did-multisite-database-check', array( $this, 'check_database_status' ) );
+			remove_action( 'did-multisite-database-check', array( $this, 'old_database_status' ) );
+		} else if ( isset( $_POST['ms-comment-mgmt']['delete-tables'] ) ) {
+			$this->delete_tables();
+		} else if ( isset( $_POST['ms-comment-mgmt']['check-files'] ) ) {
+			add_action( 'did-multisite-files-check', array( $this, 'check_files_status' ) );
+			remove_action( 'did-multisite-files-check', array( $this, 'old_files_status' ) );
+		} else if ( isset( $_POST['ms-comment-mgmt']['delete-files'] ) ) {
+			$this->delete_files();
 		}
 	}
 	
@@ -506,11 +531,27 @@ class Multisite_Comment_Management {
 		echo '</tbody></table>';
 	}
 	
+	/**
+	 * Output the network transient status meta box
+	 */
+	function network_transient_status_metabox() {
+		$this->doing_network = true;
+		
+		printf( '<p><input type="submit" name="ms-comment-mgmt[check-transients]" value="%s" class="button button-secondary"/></p>', __( 'Check Transient Status', 'multisite-comment-management' ) );
+		_e( '<p>Any items selected below that report as being 0 will be skipped. If you are getting ready to clean out transients, it is recommended that you check the status before doing so.</p>', 'multisite-comment-management' );
+		do_action( 'did-multisite-transients-check' );
+		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-transients]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Transients', 'multisite-comment-management' ) );
+		
+		do_action( 'did-multisite-transients-prune' );
+		return;
+	}
+	
 	/** 
 	 * Output the transient status meta box
 	 */
 	function transient_status_metabox() {
-		printf( '<p><input type="submit" name="ms-comment-mgmt[check-transients]" value="%s" class="button button-secondary"/></p>', __( 'Check Transient Status', 'multisite-comment-management' ) );
+		$this->doing_network = false;
+		
 		_e( '<p>Any items selected below that report as being 0 will be skipped. If you are getting ready to clean out transients, it is recommended that you check the status before doing so.</p>', 'multisite-comment-management' );
 		do_action( 'did-multisite-transients-check' );
 		printf( '<p><input type="submit" name="ms-comment-mgmt[delete-transients]" value="%s" class="button button-primary"/></p>', __( 'Delete Selected Transients', 'multisite-comment-management' ) );
@@ -734,13 +775,17 @@ class Multisite_Comment_Management {
 		$checked_time = $tmp['checked'];
 		unset( $tmp );
 		
-		if ( array_key_exists( 'networks', $transients ) ) {
+		if ( array_key_exists( 'networks', $transients ) && isset( $this->doing_network ) && $this->doing_network ) {
 			printf( '<h4>%1$s</h4><p><em>%2$s</em></p>', __( 'Site/Network Transients', 'multisite-comment-management' ), sprintf( __( '*Expired transients were considered expired as of %s', 'multisite-comment-management' ), $checked_time ) );
 			$table = new MS_Transient_Status_List_Table();
 			$table->prepare_items( $transients['networks'], true );
 			$table->display();
 			unset( $transients['networks'] );
+			return;
 		}
+		
+		if ( array_key_exists( 'networks', $transients ) )
+			unset( $transients['networks'] );
 		
 		printf( '<h4>%1$s</h4><p><em>%2$s</em></p>', __( 'Normal Transients', 'multisite-comment-management' ), sprintf( __( '*Expired transients were considered expired as of %s', 'multisite-comment-management' ), $checked_time ) );
 		$table = new MS_Transient_Status_List_Table();
@@ -748,66 +793,100 @@ class Multisite_Comment_Management {
 		$table->display();
 		
 		return;
+	}
+	
+	/**
+	 * Check the status of orphaned tables
+	 */
+	function check_database_status() {
+		global $wpdb;
+		$tables = $wpdb->get_results( "SHOW TABLES", ARRAY_N );
 		
-		if ( array_key_exists( 'networks', $transients ) ) {
-			$this->output_transient_status_table( $transients['networks'], false );
-			unset( $transients['networks'] );
+		$sites = $this->gather_sites();
+		foreach ( $sites as $k=>$s ) {
+			$sites[$k] = $wpdb->base_prefix . $s . '_';
 		}
 		
-		$tmp = $transients;
-		$tmp = array_shift( $tmp );
-		$checked_time = $tmp['checked'];
-		unset( $tmp );
-		
-		printf( '<table id="ms-comment-management-status-data">
-		<caption><h4>%6$s</h4><p><em>%7$s</em></p></caption>
-		<thead>
-			<tr>
-				<th scope="col">%5$s</th>
-				<th scope="col">%1$s</th>
-				<th scope="col"><span class="select-all-button expired"><input type="checkbox"/></span>%2$s</th>
-				<th scope="col"><span class="select-all-button all-transients"><input type="checkbox"/></span>%3$s</th>
-			</tr>
-		</thead>
-		<tfoot>
-			<tr>
-				<th scope="col">%5$s</th>
-				<th scope="col">%1$s</th>
-				<th scope="col"><span class="select-all-button expired"><input type="checkbox"/></span>%2$s</th>
-				<th scope="col"><span class="select-all-button all-transients"><input type="checkbox"/></span>%3$s</th>
-			</tr>
-		</tfoot>
-		<tbody>', 
-			__( 'Name', 'multisite-comment-management' ), 
-			__( 'Expired', 'multisite-comment-management' ), 
-			__( 'All', 'multisite-comment-management' ), 
-			'', 
-			__( 'ID', 'multisite-comment-management' ), 
-			$blogs ? __( 'Normal Transients' ) : __( 'Site/Network Transients' ), 
-			sprintf( __( '*Expired transients were considered expired as of %s' ), $checked_time )
-		);
-		
-		$i = 0;
-		foreach ( $transients as $k=>$c ) {
-			if ( 'networks' == $k )
-				continue;
+		foreach ( $tables as $t ) {
+			if ( is_array( $t ) )
+				$table = array_pop( $t );
+			else
+				$table = $t;
 			
-			printf( '<tr class="%1$s status-row">
-				<th scope="row" class="site-id">%2$d</th>
-				<td class="site-name">%3$s</td>
-				<td class="expired-status number"><span class="select-one-button expired"><input type="checkbox" name="ms-comment-mgmt[transients]%6$s[%2$d][expired]" value="%4$d"/></span>%4$d</td>
-				<td class="all-transients-status number"><span class="select-one-button all-transients"><input type="checkbox" name="ms-comment-mgmt[transients]%6$s[%2$d][all]" value="%5$d"/></span>%5$d</td>
-			</tr>', 
-				$i%2 ? 'odd-row' : 'even-row', 
-				intval( $k ), 
-				$c['name'], 
-				intval( $c['expired'] ), 
-				intval( $c['all'] ), 
-				$blogs ? '' : '[networks]'
-			);
-			$i++;
+			$tablename = str_replace( $wpdb->base_prefix, '', $table );
 		}
-		echo '</tbody></table>';
+		
+		update_site_option( 'ms-comment-management-database-status', $tables );
+		
+		$this->output_database_status_table( $tables );
+	}
+	
+	/**
+	 * Output the cached table information
+	 */
+	function old_database_status() {
+		$tables = get_site_option( 'ms-comment-management-database-status', false );
+		if ( empty( $tables ) )
+			return;
+		
+		$tmp = $tables;
+		$tmp = array_pop( $tmp );
+		printf( __( '<p>The database status information below was last generated on <strong>%s</strong></p>', 'multisite-comment-management' ), $tmp['checked'] );
+		$this->output_database_status_table( $tables );
+	}
+	
+	/**
+	 * Delete selected tables from the database
+	 */
+	function delete_tables() {
+		return;
+	}
+	
+	/**
+	 * Output the table showing table/database status information
+	 */
+	function output_database_status_table( $tables=array() ) {
+		print( '<pre><code>' );
+		var_dump( $tables );
+		print( '</code></pre>' );
+		return;
+	}
+	
+	/**
+	 * Check the status of large files
+	 */
+	function check_files_status() {
+	}
+	
+	/**
+	 * Output the cached files information
+	 */
+	function old_files_status() {
+		$files = get_site_option( 'ms-comment-management-files-status', false );
+		if ( empty( $files ) )
+			return;
+		
+		$tmp = $files;
+		$tmp = array_pop( $tmp );
+		printf( __( '<p>The large files status information below was last generated on <strong>%s</strong> and shows files that were larger than %dmegabyts</p>', 'multisite-comment-management' ), $tmp['checked'], intval( $tmp['check-size'] / 1024 ) );
+		$this->output_files_status_table( $tables );
+	}
+	
+	/**
+	 * Delete selected files from the file system
+	 */
+	function delete_files() {
+		return;
+	}
+	
+	/**
+	 * Output the table showing table/database status information
+	 */
+	function output_files_status_table( $files=array() ) {
+		print( '<pre><code>' );
+		var_dump( $files );
+		print( '</code></pre>' );
+		return;
 	}
 	
 	/**
@@ -996,6 +1075,18 @@ class Multisite_Comment_Management {
 	text-align: right;
 	margin: 0;
 	padding: 0;
+}
+
+#ms-comment-mgmt-page-wrapper .sortable .number {
+	padding-right: 8px;
+}
+
+#ms-comment-mgmt-page-wrapper .column-expired span, 
+#ms-comment-mgmt-page-wrapper .column-all span, 
+#ms-comment-mgmt-page-wrapper .column-spam span, 
+#ms-comment-mgmt-page-wrapper .column-unapproved span, 
+#ms-comment-mgmt-page-wrapper .column-approved span {
+	float: right;
 }
 
 #ms-comment-mgmt-page-wrapper td.column-spam:hover, 

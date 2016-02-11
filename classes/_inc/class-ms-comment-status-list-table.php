@@ -22,8 +22,11 @@ class MS_Comment_Status_List_Table extends WP_List_Table {
 	
 	function get_sortable_columns() {
 		return apply_filters( 'ms-comment-status-list-table-sortable', array(
-			'id' => array( 'id', false ), 
-			'name' => array( 'name', false )
+			'id' => array( 'id', true ), 
+			'name' => array( 'name', false ), 
+			'spam' => array( 'spam', false ), 
+			'unapproved' => array( 'unapproved', false ), 
+			'approved' => array( 'approved', false ), 
 		) );
 	}
 	
@@ -65,6 +68,9 @@ class MS_Comment_Status_List_Table extends WP_List_Table {
 		$order = ( ! empty($_GET['order'] ) ) ? $_GET['order'] : 'asc';
 		switch( $orderby ) {
 			case 'id' :
+			case 'spam' : 
+			case 'approved' : 
+			case 'unapproved' :
 				$result = intval( $a[$orderby] ) < intval( $b[$orderby] ) ? -1 : ( intval( $a[$orderby] ) > intval( $b[$orderby] ) ? 1 : 0 );
 				break;
 			default :
